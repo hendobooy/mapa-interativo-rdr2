@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mapa RDR2</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --fundo: #181410;
+    --painel: #221c16;
+    --painel-2: #2c241c;
+    --borda: #3d3227;
+    --texto: #e8dcc8;
+    --texto-2: #a8977d;
+    --destaque: #c9372c;
+    --ouro: #d4a94f;
+    --mapa-vazio: #2a2219;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--fundo); color: var(--texto);
+    font: 14px/1.45 Georgia, "Times New Roman", serif; }
+  body { display: flex; overflow: hidden; }
+
+  /* ---------- painel lateral ---------- */
+  #painel { width: 320px; flex: none; height: 100%; display: flex; flex-direction: column;
+    background: var(--painel); border-right: 1px solid var(--borda); z-index: 1000; }
+  #painel header { padding: 16px 16px 12px; border-bottom: 1px solid var(--borda); }
+  #painel h1 { margin: 0 0 2px; font-size: 20px; letter-spacing: .04em; text-transform: uppercase; }
+  #painel h1 span { color: var(--destaque); }
+  .progresso-geral { font-size: 12px; color: var(--texto-2); }
+  .barra { height: 4px; background: var(--painel-2); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+  .barra i { display: block; height: 100%; background: var(--ouro); width: 0; transition: width .3s; }
+
+  #busca-box { padding: 12px 16px; border-bottom: 1px solid var(--borda); position: relative; }
+  #busca { width: 100%; padding: 8px 10px; background: var(--fundo); color: var(--texto);
+    border: 1px solid var(--borda); border-radius: 4px; font: inherit; }
+  #busca:focus { outline: none; border-color: var(--ouro); }
+  #resultados { list-style: none; margin: 6px 0 0; padding: 0; max-height: 260px; overflow-y: auto; }
+  #resultados:empty { display: none; }
+  #resultados li { display: flex; align-items: center; gap: 8px; padding: 5px 6px; cursor: pointer; border-radius: 3px; }
+  #resultados li:hover { background: var(--painel-2); }
+  #resultados img { width: 17px; height: 22px; flex: none; }
+  #resultados small { color: var(--texto-2); display: block; font-size: 11px; }
+
+  .controles { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 10px 16px;
+    border-bottom: 1px solid var(--borda); }
+  button { font: inherit; font-size: 12px; color: var(--texto); background: var(--painel-2);
+    border: 1px solid var(--borda); border-radius: 4px; padding: 5px 10px; cursor: pointer; }
+  button:hover { border-color: var(--ouro); }
+  label.check { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--texto-2); cursor: pointer; }
+
+  #grupos { flex: 1; overflow-y: auto; padding: 4px 0 16px; }
+  details { border-bottom: 1px solid var(--borda); }
+  summary { display: flex; align-items: center; gap: 8px; padding: 10px 16px; cursor: pointer;
+    list-style: none; font-weight: bold; letter-spacing: .03em; user-select: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "▸"; color: var(--texto-2); width: 10px; transition: transform .15s; }
+  details[open] summary::before { transform: rotate(90deg); }
+  summary .nome { flex: 1; }
+  summary .conta { font-weight: normal; font-size: 12px; color: var(--texto-2); }
+  .cats { list-style: none; margin: 0; padding: 0 8px 8px; }
+  .cats li { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 3px; cursor: pointer; }
+  .cats li:hover { background: var(--painel-2); }
+  .cats li.off { opacity: .4; }
+  .cats img { width: 17px; height: 22px; flex: none; }
+  .cats .nome { flex: 1; }
+  .cats .conta { font-size: 11px; color: var(--texto-2); font-variant-numeric: tabular-nums; }
+  .cats li.completo .conta { color: var(--ouro); }
+
+  #painel footer { padding: 10px 16px; border-top: 1px solid var(--borda); font-size: 11px; color: var(--texto-2);
+    display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+
+  /* ---------- mapa ---------- */
+  #mapa { flex: 1; height: 100%; }
+  .leaflet-container { background: var(--fundo); font: inherit; }
+  .area-mapa { fill: var(--mapa-vazio); }
+  #avisos { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 900;
+    display: flex; flex-direction: column; gap: 6px; max-width: calc(100% - 32px); pointer-events: none; }
+  .aviso { background: var(--painel); border: 1px solid var(--borda); border-radius: 4px; padding: 8px 14px;
+    font-size: 12px; color: var(--texto-2); text-align: center; }
+  .aviso.erro { border-color: var(--destaque); color: var(--texto); }
+  .aviso[hidden] { display: none; }
+  #modo.local { color: var(--ouro); }
+
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--painel); color: var(--texto);
+    border: 1px solid var(--borda); }
+  .leaflet-popup-content { margin: 12px 14px; max-width: 300px; max-height: 340px; overflow-y: auto; }
+  .leaflet-container a.leaflet-popup-close-button { color: var(--texto-2); }
+  .popup h3 { margin: 0; font-size: 16px; }
+  .popup .cat { font-size: 11px; color: var(--texto-2); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+  .popup .desc p { margin: 0 0 8px; }
+  .popup .desc ul { margin: 0 0 8px; padding-left: 18px; }
+  .popup a { color: var(--ouro); }
+  .popup .rodape { display: flex; justify-content: space-between; align-items: center;
+    border-top: 1px solid var(--borda); padding-top: 8px; margin-top: 4px; }
+  .popup .rodape label { color: var(--texto); font-size: 13px; }
+  .leaflet-control-attribution { background: rgba(24,20,16,.8) !important; color: var(--texto-2); }
+  .leaflet-control-zoom a { background: var(--painel) !important; color: var(--texto) !important;
+    border-color: var(--borda) !important; }
+
+  #abrir-painel { display: none; }
+
+  @media (max-width: 700px) {
+    #painel { position: fixed; inset: 0 auto 0 0; width: min(320px, 88vw); transform: translateX(-100%);
+      transition: transform .2s; box-shadow: 0 0 24px rgba(0,0,0,.6); z-index: 1100; }
+    body.painel-aberto #painel { transform: none; }
+    #abrir-painel { display: block; position: absolute; top: 12px; right: 12px; z-index: 1050;
+      font-size: 14px; padding: 8px 12px; }
+    #avisos { top: 60px; }
+  }
+</style>
+</head>
+<body>
+<aside id="painel">
+  <header>
+    <h1>Red Dead <span>2</span></h1>
+    <div class="progresso-geral" id="progresso-texto"></div>
+    <div class="barra"><i id="progresso-barra"></i></div>
+  </header>
+  <div id="busca-box">
+    <input id="busca" type="search" placeholder="Buscar local, item, animal..." autocomplete="off">
+    <ul id="resultados"></ul>
+  </div>
+  <div class="controles">
+    <button id="mostrar-tudo">Mostrar tudo</button>
+    <button id="ocultar-tudo">Ocultar tudo</button>
+    <label class="check"><input type="checkbox" id="ocultar-encontrados"> Ocultar encontrados</label>
+  </div>
+  <div id="grupos"></div>
+  <footer>
+    <span id="modo">Clique num pino para marcar como encontrado</span>
+    <button id="zerar">Zerar</button>
+  </footer>
+</aside>
+
+<div id="mapa"></div>
+<button id="abrir-painel">☰ Filtros</button>
+<div id="avisos">
+  <div class="aviso" id="aviso-mapa" hidden>Não foi possível carregar o mapa da Rockstar. Verifique sua conexão com a internet.</div>
+  <div class="aviso erro" id="aviso-salvar" hidden>Não foi possível salvar. Abra o servidor.py de novo: as mudanças serão enviadas assim que ele voltar.</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="dados.js"></script>
+<script>
+(async function () {
+  const { icones, categorias, pinos: brutos } = window.RDR2;
+
+  // Grupos na ordem em que aparecem no painel
+  const GRUPOS = [
+    ["Collectibles", "Colecionáveis"],
+    ["Madam Nazar's Items", "Itens da Madam Nazar"],
+    ["Pickups", "Itens no mapa"],
+    ["Events", "Eventos"],
+    ["Amenities", "Serviços"],
+    ["Minigames", "Minijogos"],
+    ["Other", "Outros"],
+    ["Online", "Red Dead Online"],
+  ];
+  // Escondidos na primeira visita: muitos pinos (plantas) ou de outro modo de jogo
+  const PADRAO_OCULTOS = cat => cat.grupo === "Online" || cat.nome === "Plant";
+
+  // ---------- estado salvo ----------
+  // Aberto pelo servidor.py: encontrados vão para rdr2map_pinos.json e o resto
+  // para configuracao.json. Aberto direto do arquivo: fica só neste navegador.
+  const servidor = await carregarEstadoDoServidor();
+  const avisoSalvar = document.getElementById("aviso-salvar");
+
+  async function carregarEstadoDoServidor() {
+    if (!location.protocol.startsWith("http")) return null;
+    try {
+      const r = await fetch("api/estado", { cache: "no-store" });
+      return r.ok ? await r.json() : null;
+    } catch { return null; }
+  }
+
+  // Mudanças ainda não confirmadas pelo servidor. Se ele cair, ficam aqui e são
+  // reenviadas a cada 3 s até ele voltar (o servidor grava o valor final, então
+  // reenviar não tem problema).
+  const filaEncontrados = new Map(); // id -> true/false
+  const filaConfig = new Map();      // chave -> valor
+  let sincronizando = false, timerSync = null;
+
+  function agendarSync(atraso) {
+    clearTimeout(timerSync);
+    timerSync = setTimeout(sincronizar, atraso);
+  }
+
+  async function enviar(rota, corpo, keepalive = false) {
+    try {
+      const r = await fetch(rota, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corpo), keepalive,
+      });
+      return r.ok;
+    } catch { return false; }
+  }
+
+  async function sincronizar() {
+    if (sincronizando) return agendarSync(300);
+    sincronizando = true;
+    for (const valor of [true, false]) {
+      const ids = [...filaEncontrados].filter(([, v]) => v === valor).map(([id]) => id);
+      if (ids.length && await enviar("api/encontrado", { ids, encontrado: valor })) {
+        // só tira da fila se não mudou de novo enquanto enviava
+        for (const id of ids) if (filaEncontrados.get(id) === valor) filaEncontrados.delete(id);
+      }
+    }
+    for (const [chave, valor] of [...filaConfig]) {
+      if (await enviar("api/config", { chave, valor }) && filaConfig.get(chave) === valor) filaConfig.delete(chave);
+    }
+    sincronizando = false;
+    const pendente = filaEncontrados.size + filaConfig.size > 0;
+    avisoSalvar.hidden = !pendente;
+    if (pendente) agendarSync(3000);
+  }
+
+  if (servidor) {
+    // Ao fechar a aba, manda o que faltar (ex.: a posição do mapa ainda no intervalo de espera)
+    window.addEventListener("pagehide", () => {
+      for (const valor of [true, false]) {
+        const ids = [...filaEncontrados].filter(([, v]) => v === valor).map(([id]) => id);
+        if (ids.length) enviar("api/encontrado", { ids, encontrado: valor }, true);
+      }
+      for (const [chave, valor] of filaConfig) enviar("api/config", { chave, valor }, true);
+    });
+    window.addEventListener("beforeunload", e => { if (!avisoSalvar.hidden) e.preventDefault(); });
+  }
+
+  const salvo = {
+    ler(chave, padrao) {
+      if (servidor) return chave in servidor.config ? servidor.config[chave] : padrao;
+      try { const v = localStorage.getItem("rdr2." + chave); return v === null ? padrao : JSON.parse(v); }
+      catch { return padrao; }
+    },
+    gravar(chave, valor) {
+      if (servidor) {
+        // Espera um pouco: mover o mapa dispara várias gravações seguidas
+        servidor.config[chave] = valor;
+        filaConfig.set(chave, valor);
+        agendarSync(500);
+        return;
+      }
+      try { localStorage.setItem("rdr2." + chave, JSON.stringify(valor)); } catch {}
+    },
+  };
+
+  function salvarEncontrados(ids, valor) {
+    if (!servidor) return salvo.gravar("encontrados", [...encontrados]);
+    for (const id of ids) filaEncontrados.set(id, valor);
+    agendarSync(0);
+  }
+
+  const modo = document.getElementById("modo");
+  if (!servidor) {
+    modo.textContent = "Salvo só neste navegador. Abra pelo servidor.py para salvar no JSON.";
+    modo.classList.add("local");
+  }
+
+  const catPorId = new Map(categorias.map(c => [c.id, c]));
+  const pinos = brutos.map(([id, cat, lat, lng, titulo, desc, icone]) => ({
+    id, cat: catPorId.get(cat), lat, lng, titulo, desc,
+    icone: icone || catPorId.get(cat).icone,
+    busca: normalizar(titulo),
+  }));
+  const pinoPorId = new Map(pinos.map(p => [p.id, p]));
+
+  const encontrados = new Set(servidor ? servidor.encontrados : salvo.ler("encontrados", window.RDR2.encontrados || []));
+  const ativas = new Set(salvo.ler("categorias", categorias.filter(c => !PADRAO_OCULTOS(c)).map(c => c.id)));
+  let ocultarEncontrados = salvo.ler("ocultarEncontrados", false);
+  let pinoEmFoco = null; // sempre visível, mesmo com a categoria desligada
+
+  // ---------- mapa ----------
+  // Mapa oficial da Rockstar (o mesmo do Social Club), em coordenadas planas
+  const mapa = L.map("mapa", { crs: L.CRS.Simple, minZoom: 2, maxZoom: 8, zoomControl: true, attributionControl: true });
+  const limites = L.latLngBounds([-144, 0], [0, 176]);
+  mapa.setMaxBounds(limites.pad(0.15));
+
+  // Retângulo de fundo (abaixo dos tiles): mostra a área do mapa mesmo sem a imagem
+  mapa.createPane("fundo").style.zIndex = 150;
+  L.rectangle(limites, { pane: "fundo", stroke: false, fillOpacity: 1, className: "area-mapa", interactive: false }).addTo(mapa);
+
+  const tiles = L.tileLayer("https://s.rsg.sc/sc/images/games/RDR2/map/game/{z}/{x}/{y}.jpg", {
+    minZoom: 2, maxZoom: 8, maxNativeZoom: 7, bounds: limites, noWrap: true,
+    attribution: "Mapa © Rockstar Games",
+  }).addTo(mapa);
+  const avisoMapa = document.getElementById("aviso-mapa");
+  tiles.on("tileerror", () => { avisoMapa.hidden = false; });
+  tiles.on("tileload", () => { avisoMapa.hidden = true; });
+
+  // "vista2": a "vista" antiga guardava coordenadas de outro sistema
+  const vista = salvo.ler("vista2", null);
+  if (vista) mapa.setView(vista.centro, vista.zoom);
+  else mapa.fitBounds(limites);
+  mapa.on("moveend", () => salvo.gravar("vista2", { centro: mapa.getCenter(), zoom: mapa.getZoom() }));
+
+  // ---------- ícones ----------
+  // Ícones encolhem quando o mapa está afastado, senão viram uma massa só
+  const escalaDoZoom = z => (z <= 2 ? 0.5 : z === 3 ? 0.65 : z === 4 ? 0.8 : 1);
+  const cacheIcones = new Map();
+  function icone(nome, escala) {
+    const chave = nome + "@" + escala;
+    if (!cacheIcones.has(chave)) {
+      const w = 33 * escala, h = 44 * escala;
+      cacheIcones.set(chave, L.icon({
+        iconUrl: icones[nome], iconSize: [w, h], iconAnchor: [w / 2, h], popupAnchor: [0, -h + 4],
+      }));
+    }
+    return cacheIcones.get(chave);
+  }
+
+  // ---------- marcadores (só os que estão na tela ficam no mapa) ----------
+  const camada = L.layerGroup().addTo(mapa);
+  const marcadores = new Map();
+  const naTela = new Set();
+  let escalaAtual = escalaDoZoom(mapa.getZoom());
+
+  function marcador(p) {
+    let m = marcadores.get(p.id);
+    if (!m) {
+      m = L.marker([p.lat, p.lng], { icon: icone(p.icone, escalaAtual), title: p.titulo, riseOnHover: true });
+      m.bindPopup(() => conteudoPopup(p), { maxWidth: 320, autoPanPadding: [40, 40] });
+      m.on("popupclose", () => {
+        if (pinoEmFoco === p.id) { pinoEmFoco = null; desenhar(); }
+        if (location.hash === "#pino=" + p.id) history.replaceState(null, "", location.pathname);
+      });
+      marcadores.set(p.id, m);
+    }
+    m.setOpacity(encontrados.has(p.id) ? 0.35 : 1);
+    return m;
+  }
+
+  function visivel(p) {
+    if (p.id === pinoEmFoco) return true;
+    if (!ativas.has(p.cat.id)) return false;
+    return !(ocultarEncontrados && encontrados.has(p.id));
+  }
+
+  function desenhar() {
+    const area = mapa.getBounds().pad(0.3);
+    const queremos = new Set();
+    for (const p of pinos) {
+      if (visivel(p) && area.contains([p.lat, p.lng])) queremos.add(p.id);
+    }
+    for (const id of naTela) {
+      if (!queremos.has(id)) { camada.removeLayer(marcadores.get(id)); naTela.delete(id); }
+    }
+    for (const id of queremos) {
+      if (!naTela.has(id)) { camada.addLayer(marcador(pinoPorId.get(id))); naTela.add(id); }
+    }
+  }
+
+  mapa.on("moveend", desenhar);
+  mapa.on("zoomend", () => {
+    const escala = escalaDoZoom(mapa.getZoom());
+    if (escala === escalaAtual) return;
+    escalaAtual = escala;
+    for (const [id, m] of marcadores) m.setIcon(icone(pinoPorId.get(id).icone, escala));
+  });
+
+  // ---------- popup ----------
+  function escapar(s) {
+    return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  // Markdown simples: negrito, itálico, links e listas
+  function markdown(texto) {
+    const inline = s => escapar(s)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[\s(])[_*](\S.*?\S|\S)[_*](?=$|[\s.,;:)])/g, "$1<em>$2</em>")
+      .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, rotulo, url) => {
+        const interno = url.match(/rdr2map\.com\/?\?locationIds=(\d+)/);
+        if (interno && pinoPorId.has(+interno[1])) return `<a href="#pino=${interno[1]}">${rotulo}</a>`;
+        if (!/^https?:\/\//.test(url)) return rotulo;
+        return `<a href="${url}" target="_blank" rel="noopener">${rotulo}</a>`;
+      });
+    return texto.trim().split(/\n\s*\n/).map(bloco => {
+      const linhas = bloco.split("\n").map(l => l.trim()).filter(Boolean);
+      if (linhas.every(l => /^[-*] /.test(l))) {
+        return "<ul>" + linhas.map(l => "<li>" + inline(l.slice(2)) + "</li>").join("") + "</ul>";
+      }
+      return "<p>" + linhas.map(l => /^[-*] /.test(l) ? "• " + inline(l.slice(2)) : inline(l)).join("<br>") + "</p>";
+    }).join("");
+  }
+
+  function conteudoPopup(p) {
+    const div = document.createElement("div");
+    div.className = "popup";
+    const grupo = GRUPOS.find(g => g[0] === p.cat.grupo);
+    div.innerHTML = `
+      <h3>${escapar(p.titulo)}</h3>
+      <div class="cat">${escapar(grupo ? grupo[1] : p.cat.grupo)} · ${escapar(p.cat.nome)}</div>
+      ${p.desc ? `<div class="desc">${markdown(p.desc)}</div>` : ""}
+      <div class="rodape">
+        <label class="check"><input type="checkbox" ${encontrados.has(p.id) ? "checked" : ""}> Encontrado</label>
+        <a href="#pino=${p.id}" title="Link direto para este pino">link</a>
+      </div>`;
+    div.querySelector("input").addEventListener("change", e => marcarEncontrado(p, e.target.checked));
+    return div;
+  }
+
+  function marcarEncontrado(p, sim) {
+    if (sim) encontrados.add(p.id); else encontrados.delete(p.id);
+    salvarEncontrados([p.id], sim);
+    marcadores.get(p.id)?.setOpacity(sim ? 0.35 : 1);
+    atualizarContagens();
+    if (ocultarEncontrados && sim) { mapa.closePopup(); desenhar(); }
+  }
+
+  // ---------- ir até um pino (busca, links internos, #pino=ID) ----------
+  function focar(id) {
+    const p = pinoPorId.get(id);
+    if (!p) return;
+    pinoEmFoco = id;
+    mapa.setView([p.lat, p.lng], Math.max(mapa.getZoom(), 5));
+    desenhar();
+    marcador(p).openPopup();
+    fecharPainelNoCelular();
+  }
+
+  function lerHash() {
+    const m = location.hash.match(/^#pino=(\d+)$/);
+    if (m) focar(+m[1]);
+  }
+  window.addEventListener("hashchange", lerHash);
+
+  // ---------- painel de filtros ----------
+  const elGrupos = document.getElementById("grupos");
+  const linhasCat = new Map();
+  const contagensGrupo = new Map();
+
+  for (const [chave, nome] of GRUPOS) {
+    const cats = categorias.filter(c => c.grupo === chave).sort((a, b) => a.nome.localeCompare(b.nome));
+    if (!cats.length) continue;
+    const det = document.createElement("details");
+    det.open = salvo.ler("aberto." + chave, chave === "Collectibles");
+    det.addEventListener("toggle", () => salvo.gravar("aberto." + chave, det.open));
+    det.innerHTML = `<summary><span class="nome">${nome}</span><span class="conta"></span>
+      <button type="button" class="alternar-grupo">alternar</button></summary><ul class="cats"></ul>`;
+    contagensGrupo.set(chave, det.querySelector("summary .conta"));
+    det.querySelector(".alternar-grupo").addEventListener("click", e => {
+      e.preventDefault();
+      const ligar = !cats.every(c => ativas.has(c.id));
+      cats.forEach(c => ligar ? ativas.add(c.id) : ativas.delete(c.id));
+      filtrosMudaram();
+    });
+    const ul = det.querySelector("ul");
+    for (const c of cats) {
+      const li = document.createElement("li");
+      li.innerHTML = `<img src="${icones[c.icone]}" alt=""><span class="nome">${escapar(c.nome)}</span><span class="conta"></span>`;
+      li.addEventListener("click", () => {
+        if (ativas.has(c.id)) ativas.delete(c.id); else ativas.add(c.id);
+        filtrosMudaram();
+      });
+      ul.appendChild(li);
+      linhasCat.set(c.id, li);
+    }
+    elGrupos.appendChild(det);
+  }
+
+  function filtrosMudaram() {
+    salvo.gravar("categorias", [...ativas]);
+    for (const [id, li] of linhasCat) li.classList.toggle("off", !ativas.has(id));
+    desenhar();
+  }
+
+  function atualizarContagens() {
+    const porCat = new Map();
+    for (const id of encontrados) {
+      const p = pinoPorId.get(id);
+      if (p) porCat.set(p.cat.id, (porCat.get(p.cat.id) || 0) + 1);
+    }
+    let total = 0, achados = 0;
+    const porGrupo = new Map();
+    for (const c of categorias) {
+      const n = porCat.get(c.id) || 0;
+      const li = linhasCat.get(c.id);
+      li.querySelector(".conta").textContent = `${n}/${c.total}`;
+      li.classList.toggle("completo", n === c.total);
+      const g = porGrupo.get(c.grupo) || [0, 0];
+      porGrupo.set(c.grupo, [g[0] + n, g[1] + c.total]);
+      total += c.total; achados += n;
+    }
+    for (const [g, el] of contagensGrupo) {
+      const [n, t] = porGrupo.get(g);
+      el.textContent = `${n}/${t}`;
+    }
+    document.getElementById("progresso-texto").textContent =
+      `${achados.toLocaleString("pt-BR")} de ${total.toLocaleString("pt-BR")} encontrados`;
+    document.getElementById("progresso-barra").style.width = (100 * achados / total) + "%";
+  }
+
+  document.getElementById("mostrar-tudo").addEventListener("click", () => {
+    categorias.forEach(c => ativas.add(c.id)); filtrosMudaram();
+  });
+  document.getElementById("ocultar-tudo").addEventListener("click", () => {
+    ativas.clear(); filtrosMudaram();
+  });
+  const chkOcultar = document.getElementById("ocultar-encontrados");
+  chkOcultar.checked = ocultarEncontrados;
+  chkOcultar.addEventListener("change", () => {
+    ocultarEncontrados = chkOcultar.checked;
+    salvo.gravar("ocultarEncontrados", ocultarEncontrados);
+    desenhar();
+  });
+  document.getElementById("zerar").addEventListener("click", () => {
+    if (!confirm("Desmarcar todos os itens encontrados?")) return;
+    const ids = [...encontrados];
+    encontrados.clear();
+    salvarEncontrados(ids, false);
+    for (const m of marcadores.values()) m.setOpacity(1);
+    atualizarContagens();
+    desenhar();
+  });
+
+  // ---------- busca ----------
+  function normalizar(s) {
+    return s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  }
+  const elBusca = document.getElementById("busca");
+  const elResultados = document.getElementById("resultados");
+  elBusca.addEventListener("input", () => {
+    const termo = normalizar(elBusca.value.trim());
+    elResultados.innerHTML = "";
+    if (termo.length < 2) return;
+    const achados = pinos.filter(p => p.busca.includes(termo) || normalizar(p.cat.nome).includes(termo)).slice(0, 60);
+    if (!achados.length) {
+      elResultados.innerHTML = `<li style="cursor:default"><small>Nada encontrado</small></li>`;
+      return;
+    }
+    for (const p of achados) {
+      const li = document.createElement("li");
+      li.innerHTML = `<img src="${icones[p.icone]}" alt=""><span>${escapar(p.titulo)}<small>${escapar(p.cat.nome)}</small></span>`;
+      li.addEventListener("click", () => { history.replaceState(null, "", "#pino=" + p.id); focar(p.id); });
+      elResultados.appendChild(li);
+    }
+  });
+
+  // ---------- celular ----------
+  document.getElementById("abrir-painel").addEventListener("click", () => document.body.classList.toggle("painel-aberto"));
+  mapa.on("click", fecharPainelNoCelular);
+  function fecharPainelNoCelular() { document.body.classList.remove("painel-aberto"); }
+
+  filtrosMudaram();
+  atualizarContagens();
+  lerHash();
+
+  // ---------- mudanças feitas em outros aparelhos ----------
+  // Só os encontrados são compartilhados; filtros e posição do mapa seguem o
+  // último aparelho que mexeu, mas não são aplicados enquanto a página está aberta.
+  if (servidor) setInterval(async () => {
+    if (document.hidden || sincronizando || filaEncontrados.size) return;
+    const atual = await carregarEstadoDoServidor();
+    if (!atual || filaEncontrados.size) return;
+    const doServidor = new Set(atual.encontrados);
+    const mudaram = [];
+    for (const id of doServidor) if (!encontrados.has(id)) { encontrados.add(id); mudaram.push(id); }
+    for (const id of [...encontrados]) if (!doServidor.has(id)) { encontrados.delete(id); mudaram.push(id); }
+    if (!mudaram.length) return;
+    for (const id of mudaram) marcadores.get(id)?.setOpacity(encontrados.has(id) ? 0.35 : 1);
+    const aberto = document.querySelector(".leaflet-popup-content .popup input");
+    if (aberto && pinoPorId.has(pinoEmFocoOuAberto())) aberto.checked = encontrados.has(pinoEmFocoOuAberto());
+    atualizarContagens();
+    desenhar();
+  }, 4000);
+
+  function pinoEmFocoOuAberto() {
+    for (const [id, m] of marcadores) if (m.isPopupOpen()) return id;
+    return null;
+  }
+})();
+</script>
+</body>
+</html>

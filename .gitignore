@@ -1,0 +1,10 @@
+# Progresso pessoal: fica só neste PC
+progresso.json
+configuracao.json
+
+# Gerado pelo preparar.py / servidor.py (inclui o progresso)
+dados.js
+
+*.tmp
+__pycache__/
+.claude/
