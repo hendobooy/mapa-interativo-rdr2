@@ -294,40 +294,24 @@
   else mapa.fitBounds(limites);
   mapa.on("moveend", () => salvo.gravar("vista2", { centro: mapa.getCenter(), zoom: mapa.getZoom() }));
 
-  // ---------- ícones ----------
+  // ---------- pinos ----------
+  // Todos os pinos são desenhados num único <canvas>, em vez de um <img> por
+  // pino: com milhares de pinos o navegador travava a cada zoom reposicionando
+  // cada imagem. O canvas é redesenhado só quando o movimento termina; durante
+  // a animação de zoom o Leaflet apenas estica a imagem já pronta.
+
   // Ícones encolhem quando o mapa está afastado, senão viram uma massa só
   const escalaDoZoom = z => (z <= 2 ? 0.5 : z === 3 ? 0.65 : z === 4 ? 0.8 : 1);
-  const cacheIcones = new Map();
-  function icone(nome, escala) {
-    const chave = nome + "@" + escala;
-    if (!cacheIcones.has(chave)) {
-      const w = 33 * escala, h = 44 * escala;
-      cacheIcones.set(chave, L.icon({
-        iconUrl: icones[nome], iconSize: [w, h], iconAnchor: [w / 2, h], popupAnchor: [0, -h + 4],
-      }));
-    }
-    return cacheIcones.get(chave);
-  }
+  const tamanhoIcone = () => {
+    const e = escalaDoZoom(mapa.getZoom());
+    return { w: 33 * e, h: 44 * e };
+  };
 
-  // ---------- marcadores (só os que estão na tela ficam no mapa) ----------
-  const camada = L.layerGroup().addTo(mapa);
-  const marcadores = new Map();
-  const naTela = new Set();
-  let escalaAtual = escalaDoZoom(mapa.getZoom());
-
-  function marcador(p) {
-    let m = marcadores.get(p.id);
-    if (!m) {
-      m = L.marker([p.lat, p.lng], { icon: icone(p.icone, escalaAtual), title: p.titulo, riseOnHover: true });
-      m.bindPopup(() => conteudoPopup(p), { maxWidth: 320, autoPanPadding: [40, 40] });
-      m.on("popupclose", () => {
-        if (pinoEmFoco === p.id) { pinoEmFoco = null; desenhar(); }
-        if (location.hash === "#pino=" + p.id) history.replaceState(null, "", location.pathname);
-      });
-      marcadores.set(p.id, m);
-    }
-    m.setOpacity(encontrados.has(p.id) ? 0.35 : 1);
-    return m;
+  const imagens = {};
+  for (const [nome, url] of Object.entries(icones)) {
+    imagens[nome] = new Image();
+    imagens[nome].onload = () => desenhar();
+    imagens[nome].src = url;
   }
 
   function visivel(p) {
@@ -336,29 +320,99 @@
     return !(ocultarEncontrados && encontrados.has(p.id));
   }
 
-  function desenhar() {
-    const area = mapa.getBounds().pad(0.3);
-    const queremos = new Set();
-    for (const p of pinos) {
-      if (visivel(p) && area.contains([p.lat, p.lng])) queremos.add(p.id);
-    }
-    for (const id of naTela) {
-      if (!queremos.has(id)) { camada.removeLayer(marcadores.get(id)); naTela.delete(id); }
-    }
-    for (const id of queremos) {
-      if (!naTela.has(id)) { camada.addLayer(marcador(pinoPorId.get(id))); naTela.add(id); }
-    }
-  }
+  // Pinos desenhados no último quadro, em ordem de desenho, para saber o que
+  // está sob o mouse: [pino, x, y] com x/y no ponto de apoio (base do ícone)
+  let desenhados = [];
 
-  mapa.on("moveend", desenhar);
-  mapa.on("zoomend", () => {
-    const escala = escalaDoZoom(mapa.getZoom());
-    if (escala === escalaAtual) return;
-    escalaAtual = escala;
-    for (const [id, m] of marcadores) m.setIcon(icone(pinoPorId.get(id).icone, escala));
+  const CamadaPinos = L.Canvas.extend({
+    // Desenha meia tela a mais em cada lado para o arrasto não mostrar vazio
+    options: { padding: 0.5 },
+    _updatePaths() {
+      if (!this._postponeUpdatePaths) this._redraw();
+    },
+    _draw() {
+      const ctx = this._ctx, b = this._bounds, { w, h } = tamanhoIcone();
+      const lista = [];
+      let foco = null;
+      for (const p of pinos) {
+        if (!visivel(p)) continue;
+        const pt = mapa.latLngToLayerPoint([p.lat, p.lng]);
+        if (pt.x < b.min.x - w || pt.x > b.max.x + w || pt.y < b.min.y || pt.y > b.max.y + h) continue;
+        if (p.id === pinoEmFoco) foco = [p, pt.x, pt.y];
+        else lista.push([p, pt.x, pt.y]);
+      }
+      if (foco) lista.push(foco); // o pino em foco fica por cima
+      for (const [p, x, y] of lista) {
+        const img = imagens[p.icone];
+        if (!img.complete) continue;
+        ctx.globalAlpha = encontrados.has(p.id) ? 0.35 : 1;
+        ctx.drawImage(img, x - w / 2, y - h, w, h);
+      }
+      ctx.globalAlpha = 1;
+      desenhados = lista;
+    },
   });
 
-  // ---------- popup ----------
+  mapa.createPane("pinos").style.zIndex = 600;
+  const camada = new CamadaPinos({ pane: "pinos" }).addTo(mapa);
+
+  let pedidoDesenho = null;
+  function desenhar() {
+    if (pedidoDesenho) return;
+    pedidoDesenho = requestAnimationFrame(() => { pedidoDesenho = null; camada._redraw(); });
+  }
+
+  function pinoNoPonto(pontoCamada) {
+    const { w, h } = tamanhoIcone();
+    for (let i = desenhados.length - 1; i >= 0; i--) {
+      const [p, x, y] = desenhados[i];
+      if (Math.abs(pontoCamada.x - x) <= w / 2 && pontoCamada.y <= y && pontoCamada.y >= y - h) return p;
+    }
+    return null;
+  }
+
+  mapa.on("click", e => {
+    const p = pinoNoPonto(e.layerPoint);
+    if (p) abrirPopup(p);
+  });
+
+  // Mãozinha e nome do pino ao passar o mouse
+  let sobMouse = null;
+  mapa.on("mousemove", e => {
+    const p = pinoNoPonto(e.layerPoint);
+    if (p === sobMouse) return;
+    sobMouse = p;
+    const el = mapa.getContainer();
+    el.style.cursor = p ? "pointer" : "";
+    el.title = p ? p.titulo : "";
+  });
+
+  // ---------- popup (um só, reaproveitado) ----------
+  const popup = L.popup({ maxWidth: 320, autoPanPadding: [40, 40] });
+  let pinoAberto = null;
+
+  function abrirPopup(p) {
+    pinoAberto = p.id;
+    // O popup fica preso à base do pino; sobe até o topo do ícone
+    popup.options.offset = L.point(0, 11 - tamanhoIcone().h);
+    popup.setLatLng([p.lat, p.lng]).setContent(conteudoPopup(p)).openOn(mapa);
+  }
+
+  mapa.on("popupclose", e => {
+    if (e.popup !== popup) return;
+    const id = pinoAberto;
+    pinoAberto = null;
+    if (pinoEmFoco === id) { pinoEmFoco = null; desenhar(); }
+    if (location.hash === "#pino=" + id) history.replaceState(null, "", location.pathname);
+  });
+
+  mapa.on("zoomend", () => {
+    if (!pinoAberto) return;
+    popup.options.offset = L.point(0, 11 - tamanhoIcone().h);
+    popup.update();
+  });
+
+  // ---------- conteúdo do popup ----------
   function escapar(s) {
     return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
@@ -402,9 +456,9 @@
   function marcarEncontrado(p, sim) {
     if (sim) encontrados.add(p.id); else encontrados.delete(p.id);
     salvarEncontrados([p.id], sim);
-    marcadores.get(p.id)?.setOpacity(sim ? 0.35 : 1);
     atualizarContagens();
-    if (ocultarEncontrados && sim) { mapa.closePopup(); desenhar(); }
+    if (ocultarEncontrados && sim) mapa.closePopup();
+    desenhar();
   }
 
   // ---------- ir até um pino (busca, links internos, #pino=ID) ----------
@@ -414,7 +468,7 @@
     pinoEmFoco = id;
     mapa.setView([p.lat, p.lng], Math.max(mapa.getZoom(), 5));
     desenhar();
-    marcador(p).openPopup();
+    abrirPopup(p);
     fecharPainelNoCelular();
   }
 
@@ -508,7 +562,6 @@
     const ids = [...encontrados];
     encontrados.clear();
     salvarEncontrados(ids, false);
-    for (const m of marcadores.values()) m.setOpacity(1);
     atualizarContagens();
     desenhar();
   });
@@ -557,17 +610,11 @@
     for (const id of doServidor) if (!encontrados.has(id)) { encontrados.add(id); mudaram.push(id); }
     for (const id of [...encontrados]) if (!doServidor.has(id)) { encontrados.delete(id); mudaram.push(id); }
     if (!mudaram.length) return;
-    for (const id of mudaram) marcadores.get(id)?.setOpacity(encontrados.has(id) ? 0.35 : 1);
     const aberto = document.querySelector(".leaflet-popup-content .popup input");
-    if (aberto && pinoPorId.has(pinoEmFocoOuAberto())) aberto.checked = encontrados.has(pinoEmFocoOuAberto());
+    if (aberto && pinoAberto) aberto.checked = encontrados.has(pinoAberto);
     atualizarContagens();
     desenhar();
   }, 4000);
-
-  function pinoEmFocoOuAberto() {
-    for (const [id, m] of marcadores) if (m.isPopupOpen()) return id;
-    return null;
-  }
 })();
 </script>
 </body>
