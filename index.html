@@ -267,6 +267,12 @@
 
   const encontrados = new Set(servidor ? servidor.encontrados : salvo.ler("encontrados", window.RDR2.encontrados || []));
   const ativas = new Set(salvo.ler("categorias", categorias.filter(c => !PADRAO_OCULTOS(c)).map(c => c.id)));
+  // Os chapéus saíram de "Item": quem já tinha filtros salvos com "Item" ligado continua vendo
+  const ID_ITEM = 41, ID_CHAPEUS = 100041;
+  if (!salvo.ler("chapeusSeparados", false)) {
+    if (ativas.has(ID_ITEM)) ativas.add(ID_CHAPEUS);
+    salvo.gravar("chapeusSeparados", true);
+  }
   let ocultarEncontrados = salvo.ler("ocultarEncontrados", false);
   let pinoEmFoco = null; // sempre visível, mesmo com a categoria desligada
 

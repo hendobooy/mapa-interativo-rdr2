@@ -28,9 +28,11 @@ CONV_X = (0.01165463803320517, 1.4210493970125113e-06, 0.01625127669082968)
 CONV_Y = (-1.4003008887043492e-07, -0.011653624670062923, -0.01790461455339528)
 
 # A origem usa o ícone de chapéu em toda a categoria "Item", que também tem cartas,
-# livros, joias etc. O chapéu fica só no que se veste; o resto usa este ícone de bolsa,
-# na mesma cor e formato de pino.
+# livros, joias etc. O que se veste vai para uma categoria própria (o id é repetido em
+# index.html); o resto continua em "Item" com este ícone de bolsa, na mesma cor e
+# formato de pino.
 VESTIVEL = re.compile(r"\b(hat|helmet|mask|skullcap|sombrero)\b", re.IGNORECASE)
+ID_CHAPEUS = 100041
 ICONE_ITEM = "data:image/svg+xml," + quote(
     '<svg xmlns="http://www.w3.org/2000/svg" width="33" height="44" viewBox="0 0 33 44">'
     '<path fill="#4d5382" d="M16.5 1C7.5 1 1 8 1 16c0 10 10 19 15.500 27C22 35 32 26 32 16 32 8 25.500 1 16.500 1z"/>'
@@ -86,12 +88,14 @@ def gerar_dados():
     categorias = {}
     saida = []
     for p in pinos:
-        cid = p["categoria_id"]
+        do_item = p["icone"] == "hat"
+        vestivel = do_item and VESTIVEL.search(p["titulo"])
+        cid = ID_CHAPEUS if vestivel else p["categoria_id"]
         cat = categorias.setdefault(cid, {
             "id": cid,
-            "nome": p["categoria"],
+            "nome": "Chapéus e máscaras" if vestivel else p["categoria"],
             "grupo": p["grupo"],
-            "icone": "item" if p["icone"] == "hat" else p["icone"],
+            "icone": "hat" if vestivel else "item" if do_item else p["icone"],
             "total": 0,
         })
         cat["total"] += 1
@@ -103,10 +107,7 @@ def gerar_dados():
             descricao = "A localização dela muda todos os dias."
 
         x, y = para_mapa(p["latitude"], p["longitude"])
-        icone = p["icone"]
-        if icone == "hat" and not VESTIVEL.search(p["titulo"]):
-            icone = "item"
-        icone = icone if icone != cat["icone"] else 0
+        icone = p["icone"] if not do_item and p["icone"] != cat["icone"] else 0
         saida.append([p["id"], cid, y, x, titulo, descricao, icone])
 
     dados = {

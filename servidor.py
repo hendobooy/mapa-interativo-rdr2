@@ -126,6 +126,17 @@ class Handler(SimpleHTTPRequestHandler):
         self.responder(404, {"erro": "rota desconhecida"})
 
 
+class ServidorExclusivo(ThreadingHTTPServer):
+    # No Windows, o padrão deixa dois servidores abrirem na mesma porta, e cada um
+    # guardaria o progresso por cima do outro
+    allow_reuse_address = False
+
+    def server_bind(self):
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def ip_da_rede():
     # Conectar um socket UDP não envia nada; só faz o sistema escolher a placa de rede
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -147,7 +158,10 @@ def main():
 
     # 0.0.0.0 = aceita celular e outros aparelhos da mesma rede Wi-Fi
     endereco = "127.0.0.1" if args.so_este_pc else "0.0.0.0"
-    servidor = ThreadingHTTPServer((endereco, args.porta), Handler)
+    try:
+        servidor = ServidorExclusivo((endereco, args.porta), Handler)
+    except OSError:
+        raise SystemExit(f"A porta {args.porta} já está em uso: o mapa já deve estar aberto em outra janela.")
     url = f"http://localhost:{args.porta}/"
     print(f"Mapa rodando em {url}")
     if not args.so_este_pc:
