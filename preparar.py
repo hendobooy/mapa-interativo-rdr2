@@ -11,6 +11,8 @@ Uso:
 import json
 import math
 import os
+import re
+from urllib.parse import quote
 
 PASTA = os.path.dirname(os.path.abspath(__file__))
 
@@ -24,6 +26,17 @@ MUNDO_PX_Z6 = 16384
 # Erro mediano: 0,04 unidade (~5 px no zoom 7).
 CONV_X = (0.01165463803320517, 1.4210493970125113e-06, 0.01625127669082968)
 CONV_Y = (-1.4003008887043492e-07, -0.011653624670062923, -0.01790461455339528)
+
+# A origem usa o ícone de chapéu em toda a categoria "Item", que também tem cartas,
+# livros, joias etc. O chapéu fica só no que se veste; o resto usa este ícone de bolsa,
+# na mesma cor e formato de pino.
+VESTIVEL = re.compile(r"\b(hat|helmet|mask|skullcap|sombrero)\b", re.IGNORECASE)
+ICONE_ITEM = "data:image/svg+xml," + quote(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="33" height="44" viewBox="0 0 33 44">'
+    '<path fill="#4d5382" d="M16.5 1C7.5 1 1 8 1 16c0 10 10 19 15.500 27C22 35 32 26 32 16 32 8 25.500 1 16.500 1z"/>'
+    '<path fill="#fff" fill-rule="evenodd" d="M12 13a4.500 4.500 0 0 1 9 0h3.500L26 25H7l1.500-12zm2 0h5a2.500 2.500 0 0 0-5 0z"/>'
+    "</svg>"
+)
 
 
 def caminho(nome):
@@ -78,7 +91,7 @@ def gerar_dados():
             "id": cid,
             "nome": p["categoria"],
             "grupo": p["grupo"],
-            "icone": p["icone"],
+            "icone": "item" if p["icone"] == "hat" else p["icone"],
             "total": 0,
         })
         cat["total"] += 1
@@ -90,11 +103,14 @@ def gerar_dados():
             descricao = "A localização dela muda todos os dias."
 
         x, y = para_mapa(p["latitude"], p["longitude"])
-        icone = p["icone"] if p["icone"] != cat["icone"] else 0
+        icone = p["icone"]
+        if icone == "hat" and not VESTIVEL.search(p["titulo"]):
+            icone = "item"
+        icone = icone if icone != cat["icone"] else 0
         saida.append([p["id"], cid, y, x, titulo, descricao, icone])
 
     dados = {
-        "icones": {nome: i["png_base64"] for nome, i in icones.items()},
+        "icones": {**{nome: i["png_base64"] for nome, i in icones.items()}, "item": ICONE_ITEM},
         "categorias": list(categorias.values()),
         "pinos": saida,
         # usado só quando o mapa é aberto sem o servidor.py
